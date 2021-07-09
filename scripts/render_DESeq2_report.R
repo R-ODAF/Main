@@ -37,7 +37,7 @@ if (is.na(config$params$group_facet)) {
                        "reports",
                        filename)
   rmarkdown::render(input = inputFile,
-                    encoding = encoding,
+                    encoding = "UTF-8",
                     output_file = outFile,
                     params = config$params,
                     envir = new.env())
@@ -55,7 +55,7 @@ if (is.na(config$params$group_facet)) {
                        "reports",
                        filename)
   rmarkdown::render(input = inputFile,
-                    encoding = encoding,
+                    encoding = "UTF-8",
                     output_file = outFile,
                     params = config$params,
                     envir = new.env())
@@ -80,7 +80,7 @@ if (is.na(config$params$group_facet)) {
                          "reports",
                          filename)
     rmarkdown::render(input = inputFile,
-                      encoding = encoding,
+                      encoding = "UTF-8",
                       output_file = outFile,
                       params = config$params,
                       envir = new.env())

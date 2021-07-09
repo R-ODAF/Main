@@ -593,7 +593,8 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.na(params$group_facet)
                                     design    = current_design)
       dds <- dds[, rownames(DESeqDesign)]
       dds <- dds[rowSums(counts(dds)) > 1]
-      dds <- DESeq(dds, parallel = TRUE, BPPARAM = MulticoreParam(params$cpus))
+      bpparam <- MulticoreParam(params$cpus)
+      dds <- DESeq(dds, parallel = TRUE, BPPARAM = bpparam)
       if (is.na(params$group_facet)) {
         save(dds,
              file = file.path(paths$RData, "dds.RData"))
@@ -742,7 +743,7 @@ reads_df$original_names <- row.names(reads_df)
 
 reads_df_annotated <- dplyr::left_join(DESeqDesign, reads_df)
 
-ggplot(reads_df,
+ggplot(reads_df_annotated,
        aes(x = !!sym(params$design),
            y = reads)) +
   geom_boxplot() +
@@ -865,9 +866,10 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
   print("Obtaining the DESeq2 results")
 
 	currentContrast <- c(DESIGN, condition2, condition1)
+	bpparam <- MulticoreParam(params$cpus)
 	res <- DESeq2::results(dds[rownames(compte),],
 	               parallel = TRUE,
-	               BPPARAM = MulticoreParam(params$cpus),
+	               BPPARAM = bpparam,
 	               contrast = currentContrast,
 	               pAdjustMethod = 'fdr',
 	               cooksCutoff = cooks) # If Cooks cutoff disabled - manually inspect.
@@ -996,19 +998,17 @@ The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`.
 ################################################################################
 # Annotations
 ################################################################################
+# Compile list of all potentially relevant genes
+genes <- lapply(resListAll,
+                function(x) row.names(as.data.frame(x)))
+genes <- unlist(genes) %>% unique()
 
 #listEnsembl()
 #listMarts()
 #listDatasets(useMart('ensembl'))
-ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "useast.ensembl.org")
+ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "uswest.ensembl.org")
 #listAttributes(ensembl)
 #listFilters(ensembl)
-
-
-genes <- lapply(resListAll,
-                function(x) row.names(as.data.frame(x)))
-genes <- unlist(genes) %>% unique()
-#genes_all <- unique(row.names(assay(dds)))
 
 if (file.exists(file.path(paths$RData, "id_table.Rdata"))) {
   print(paste("Already found ID table; skipping biomaRt query and loading from disk."))
@@ -1188,19 +1188,24 @@ kable(degTable,
 ### Write results table from DESeq2
 #######################################
 write.table(allResults,
-            file = file.path(paths$DEG_output, NORM_TYPE,"-DESeq_output_ALL.txt"),
+            file = file.path(paths$DEG_output,
+                             paste0(NORM_TYPE,"-DESeq_output_ALL.txt")),
             quote = F, sep = '\t', col.names = NA)
 write.table(significantResults,
-            file = paste0(paths$DEG_output, NORM_TYPE, "-DESeq_output_significant.txt"),
+            file = paste0(paths$DEG_output,
+                             paste0(NORM_TYPE, "-DESeq_output_significant.txt")),
             quote = F, sep = '\t', col.names = NA)
 write.table(summaryTable,
-            file = paste0(paths$DEG_output, NORM_TYPE, "-DESeq_output_all_genes.txt"),
+            file = paste0(paths$DEG_output,
+                             paste0(NORM_TYPE, "-DESeq_output_all_genes.txt")),
             quote = F, sep = '\t', col.names = NA)
 write.table(CPMddsDF,
-            file = paste0(paths$DEG_output, NORM_TYPE, "-Per_sample_CPM.txt"),
+            file = paste0(paths$DEG_output,
+                             paste0(NORM_TYPE, "-Per_sample_CPM.txt")),
             quote = F, sep = '\t', col.names = NA)
 write.table(Counts,
-            file = paste0(paths$DEG_output, NORM_TYPE, "-Per_sample_normalized_counts.txt"),
+            file = paste0(paths$DEG_output,
+                             paste0(NORM_TYPE, "-Per_sample_normalized_counts.txt")),
             quote = F, sep = '\t', col.names = NA)
 ```
 
@@ -1262,7 +1267,7 @@ writeDataTable(wb1,
                na.string = "NA")
 setColWidths(wb1, sheet = 1, cols = 1:6, widths = "auto") # This is hard-coded, so prone to error; will only impact auto adjustment of col widths.
 setColWidths(wb1, sheet = 1, cols = 7:ncol(summaryTable), widths = 13) # This is hard-coded, so prone to error; will only impact auto adjustment of col widths.
-fname1 <- file.path(paths$DEG_output, "1.", NORM_TYPE, "-DESeq_by_gene.xlsx")
+fname1 <- file.path(paths$DEG_output, paste0("1.", NORM_TYPE, "-DESeq_by_gene.xlsx"))
 saveWorkbook(wb1, fname1, overwrite = TRUE)
 
 ### All results in one table
@@ -1292,7 +1297,7 @@ writeDataTable(wb2,
                keepNA = T,
                na.string = "NA")
 setColWidths(wb2, sheet = 2, cols = 1:ncol(allResults), widths = "auto")
-fname2 <- file.path(paths$DEG_output, "2.", NORM_TYPE, "-DESeq_all.xlsx")
+fname2 <- file.path(paths$DEG_output, paste0("2.", NORM_TYPE, "-DESeq_all.xlsx"))
 saveWorkbook(wb2, fname2, overwrite = TRUE)
 
 ### All results with different tabs for each contrast
@@ -1320,7 +1325,7 @@ for (i in 1:length(levels(factor(allResults$contrast)))) {
                  na.string = "NA")
   setColWidths(wb3, sheet = i, cols = 1:ncol(dataToWrite), widths = "auto")
 }
-fname3 <- file.path(paths$DEG_output, "3.", NORM_TYPE, "-DESeq_by_contrast.xlsx")
+fname3 <- file.path(paths$DEG_output, paste0("3.", NORM_TYPE, "-DESeq_by_contrast.xlsx"))
 saveWorkbook(wb3, fname3, overwrite = TRUE)
 
 ### CPM
@@ -1338,7 +1343,7 @@ writeDataTable(wb4,
                keepNA = T,
                na.string = "NA")
 setColWidths(wb4, sheet = 1, cols = 1:ncol(CPMddsDF), widths = "auto")
-fname4 <- file.path(paths$DEG_output, "4.", NORM_TYPE, "-CPM.xlsx")
+fname4 <- file.path(paths$DEG_output, paste0("4.", NORM_TYPE, "-CPM.xlsx"))
 saveWorkbook(wb4, fname4, overwrite = TRUE)
 
 ### IPA
@@ -1356,7 +1361,7 @@ writeDataTable(wb5,
                keepNA = T,
                na.string = "NA")
 setColWidths(wb5, sheet = 1, cols = 1:ncol(IPA), widths = "auto")
-fname5 <- file.path(paths$DEG_output, "5.", NORM_TYPE, "-IPA.xlsx")
+fname5 <- file.path(paths$DEG_output, paste0("5.", NORM_TYPE, "-IPA.xlsx"))
 saveWorkbook(wb5, fname5, overwrite = TRUE)
 
 ```
