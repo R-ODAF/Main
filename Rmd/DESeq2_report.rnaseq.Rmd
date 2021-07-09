@@ -2,14 +2,15 @@
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
   project_name: "Default"     # Change depending on your project name
-  species: "human"                # one of human, mouse, rat, hamster
-  design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group"]           # experimental group of interest plus covariates; can be more than one
+  species: "rat"                # one of human, mouse, rat, hamster
+  design: "Group"             # single experimental group of interest; entries in this column must match the contrast names.
+  intgroup: ["Group"]           # experimental group of interest plus covariates; can be more than one
   nuisance:  !r NA #"Batch" To remove batch effects for PCA/Heatmaps visualiziations
   flag: TRUE                  # runs all analysis by default when set to TRUE
-  platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: "chemical" #!r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: ["BaP"] #!r NA # Which group will this report be done on?
+  platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
+  group_facet: "Timepoint" #!r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter:  "5D" # !r NA # Which group will this report be done on?
+  strict_contrasts: TRUE # Use both columns (exp, cont) of contrasts file to limit what is included in the report
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column:  !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
@@ -17,6 +18,12 @@ params:
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
   run_pathway_analysis: TRUE # Optionally disable pathway analysis if not available for your organism
+  wikipathways_directory: "~/shared/dbs/wikipathways"
+  biospyder_dbs: "~/shared/dbs/biospyder/"
+  nBestFeatures: 20 # The number of best features to make plots of their counts
+  nBest: 100 # Number of features to include in table and limiting PCA/clustering analysis
+  nHeatmap: 50 # Number of most variable genes for heatmap
+  nHeatmapDEGs: 50 # Number of DEGs for heatmap
 output:
   html_document:
     toc: true
@@ -59,6 +66,9 @@ This report is meant to help explore DESeq2 results and was generated using RMar
 ```{r docSetup, warning = FALSE, message = FALSE}
 ## Define paths
 paths <- list()
+# Other important system paths to specify in config
+paths$wikipathways <- params$wikipathways_directory
+# For project structure
 paths$root <- params$projectdir
 paths$data <- paste0(paths$root, "/data")
 paths$raw <- paste0(paths$data, "/raw")
@@ -144,6 +154,7 @@ if (species == "human") {
   library('org.Hs.eg.db')
   orgdb <- "org.Hs.eg.db"
   species_sci <- "Homo sapiens"
+  wiki <- "wikipathways-20210610-gmt-Homo_sapiens.gmt"
   ensembl_species <- "hsapiens_gene_ensembl"
   species_gene_symbol <- "external_gene_name"
   kegg_organism <- "hsa"
@@ -154,6 +165,7 @@ if (species == "human") {
     library('org.Mm.eg.db')
     orgdb <- "org.Mm.eg.db"
     species_sci <- "Mus musculus"
+    wiki <- "wikipathways-20210610-gmt-Mus_musculus.gmt"
     ensembl_species <- "mmusculus_gene_ensembl"
     species_gene_symbol <- "mgi_symbol"
     kegg_organism <- "mmu"
@@ -164,8 +176,9 @@ if (species == "human") {
     library('org.Rn.eg.db')
     orgdb <- "org.Rn.eg.db"
     species_sci <- "Rattus norvegicus"
+    wiki <- "wikipathways-20210610-gmt-Rattus_norvegicus.gmt"
     ensembl_species <- "rnorvegicus_gene_ensembl"
-    species_gene_symbol <- "mgi_symbol"
+    species_gene_symbol <- "rgd_symbol"
     kegg_organism <- "rno"
     temposeq_manifest <- "190809 Rat Whole Transcriptome 1.0 Manifest.xlsx"
 } else {
@@ -195,15 +208,15 @@ The code above (not shown by default) loads the relevant R packages required for
 ```{r setup_code, warning = FALSE, message = FALSE, collapse = TRUE}
 ################################################################################
 ################################################################################
-# PARAMETERS TO SET MANUALLY                            		 
+# PARAMETERS - should be set by YAML header.
 ################################################################################
 ################################################################################
 
 # Various plotting and display options
-nBestFeatures <- 20 # The number of best features to make plots of their counts
-nBest <- 100 # Number of features to include in table and limiting PCA/clustering analysis
-nHeatmap <- 50 # Number of most variable genes for heatmap
-nHeatmapDEGs <- 50 # Number of DEGs for heatmap
+nBestFeatures <- params$nBestFeatures
+nBest <- params$nBest
+nHeatmap <- params$nHeatmap
+nHeatmapDEGs <- 50
 
 # Set analysis ID. This ID will be used as prefix for the output files
 # Normally, as follows: year - project_name - group_filter
@@ -228,11 +241,12 @@ digits = 2 # For rounding numbers
 ################################################################################
 # A. Tab delimited file with merged RSEM.genes.results files:
 if (Platform == "TempO-Seq") {
-    SampleDataFile <- file.path(paths$processed, "count_table.csv")
-    sampledata_sep = ","
-  } else {
-    SampleDataFile <- file.path(paths$processed, "genes.data.tsv")
-  }
+  SampleDataFile <- file.path(paths$processed, "count_table.csv")
+  sampledata_sep = ","
+} else {
+  SampleDataFile <- file.path(paths$processed, "genes.data.tsv")
+  sampledata_sep = "\t"
+}
   
 # B. Tab delimited sample information file with at least 2 columns:
   # 1. sample names identical to the column names of sampleData
@@ -284,10 +298,13 @@ DESeqDesignAsRead <- DESeqDesign
 # Note that these should only be run if the respective variables are set.
 if (!is.na(params$group_facet)) {
   contrasts_to_filter <- DESeqDesign %>%
-  dplyr::filter(!!sym(params$group_facet) %in% params$group_filter) %>%
+  dplyr::filter(!!sym(params$group_facet) %in% params$group_filter) %>% # NOTE: Not sure if %in% or == is better here.
   pull(params$design) %>% 
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
+  if (params$strict_contrasts == T) {
+    contrasts <- contrasts %>% dplyr::filter(V2 %in% contrasts_to_filter)
+  }
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$design) %in% (unlist(contrasts) %>% unique()) )
 }
 if (any(!is.na(params$exclude_samples))) {
@@ -300,6 +317,9 @@ if (any(!is.na(params$exclude_groups))) {
   pull(params$design) %>% 
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
+  if (params$strict_contrasts == T) {
+    contrasts <- contrasts %>% dplyr::filter(V2 %in% contrasts_to_filter)
+  }
 }
 if (!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
   DESeqDesign <- DESeqDesign %>%
@@ -336,42 +356,146 @@ if (Platform == "RNA-Seq") {
   threshold = 1000000 # Number of aligned reads per sample required
   MinCount <- 1
   alpha <- pAdjValue <- 0.05 # Relaxed from 0.01
-  linear_fc_filter = 1.5
-  biomart_filter = "ensembl_gene_id"
+  linear_fc_filter <- 1.5
+  biomart_filter <- "ensembl_gene_id"
 } else if (Platform == "TempO-Seq") {
   threshold = 100000 # Number of aligned reads per sample required
   MinCount <- 0.5
   alpha <- pAdjValue <- 0.05 
-  linear_fc_filter = 1.5
-  biomart_filter = "external_gene_name"
+  linear_fc_filter <- 1.5
+  biomart_filter <- "ensembl_gene_id"
   
-  biospyder <- read.delim(file.path("~/shared/dbs/biospyder/", temposeq_manifest), # Assay manifest...
+  biospyder <- read.delim(file.path(params$biospyder_dbs, temposeq_manifest), # Assay manifest...
                           stringsAsFactors = FALSE,
                           sep = "\t",
                           header = TRUE,
                           quote = "\"")
-  biospyder_annos <- biospyder %>% dplyr::select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
-  sampleData$PROBE_NAME <- row.names(sampleData)
-  sampleData <- sampleData %>%
-    mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", ""))
+  
+  # Fill in the blanks for TempO-Seq Manifest...
+  # Set NULL values to NA
+  biospyder[ biospyder == "NULL" ] <- NA
+  
+  # Separate out the coordinates into useful columns
+  biospyder <- biospyder %>%
+    separate(PROBE_COORDINATE, into = c("chr","pos","strand"), sep = ":" ) %>%
+    separate(pos, into = c("start","end"), sep = "-") %>%
+    mutate(start = as.numeric(start)) %>%
+    mutate(end = as.numeric(end)) %>%
+    mutate(strand = ifelse(strand == "-","-1","1"))
+  
+  # Make a table of the probes where we need a gene ID
+  missing <-  biospyder %>%
+    dplyr::filter(is.na(ENSEMBL_GENE_ID))
+  
+  # Get Ensembl Gene IDs using biomaRt based on locus
+  to_add_missing <- list()
+  try_again <- list()
+  for (row in seq_along(row.names(missing))) {
+  #for (row in 1:10) {
+    if (is.na(missing[row,]["chr"])) {
+      try_again <- c(try_again, missing[row,][["GENE_SYMBOL"]])
+    } else {
+      id <- getBM(filters = c('chromosome_name','start','end','strand'),
+                  attributes = c(biomart_filter,
+                                 'chromosome_name',
+                                 'start_position',
+                                 'end_position',
+                                 species_gene_symbol,
+                                 "strand"),
+                  values = list(missing[row,]["chr"],
+                                missing[row,]["start"],
+                                missing[row,]["end"],
+                                missing[row,]["strand"]),
+                  mart = ensembl,
+                  uniqueRows = T)
+      if (nrow(id) > 0) {
+        id$PROBE_ID <- missing[row,][["PROBE_ID"]]
+        to_add_missing[[row]] <- id
+      } else {
+        try_again <- c(try_again, missing[row,][["GENE_SYMBOL"]])
+      }
+    }
+  }
+  to_add_missing <- rbindlist(to_add_missing)
+  to_add_missing$chr <- as.character(to_add_missing$chromosome_name)
+  to_add_missing$strand <- as.character(to_add_missing$strand)
+  to_add_missing$GENE_SYMBOL <- to_add_missing$external_gene_name
+  to_add_missing <- to_add_missing %>%
+    dplyr::select(-c(external_gene_name, chromosome_name))
+  
+  symbol_to_ensembl <- getBM(filters = c('external_gene_name'),
+                             attributes = c(biomart_filter,
+                                            'chromosome_name',
+                                            'start_position',
+                                            'end_position',
+                                            species_gene_symbol,
+                                            "strand"),
+                             values =  unlist(try_again),
+                             mart = ensembl,
+                             uniqueRows = T)
 
-sampleDataTable <- data.table(sampleData %>% dplyr::select(-PROBE_NAME))
-sampleData <- sampleDataTable[, lapply(.SD, sum), by = "GENE_SYMBOL"]
- 
-  # sampleData <- sampleData %>%
-  #   mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", "")) %>%
-  #   dplyr::group_by(GENE_SYMBOL) %>%
-  #   dplyr::summarise_if(.predicate = function(x) is.numeric(x),
-  #                       .funs = c("sum")) %>%
-  #   ungroup()
-  sampleData <- as.data.frame(sampleData)
-  row.names(sampleData) <- sampleData$GENE_SYMBOL
-  sampleData <- sampleData[,-1]
+  symbol_to_ensembl$chr <- as.character(symbol_to_ensembl$chromosome_name)
+  symbol_to_ensembl$strand <- as.character(symbol_to_ensembl$strand)
+  symbol_to_ensembl$GENE_SYMBOL <- symbol_to_ensembl$external_gene_name
+  symbol_to_ensembl <- symbol_to_ensembl %>%
+    dplyr::select(-c(external_gene_name, chromosome_name))
+  
+  try_again_2 <- unlist(try_again)[!unlist(try_again) %in% symbol_to_ensembl$GENE_SYMBOL]
+  try_again_2 <- missing[missing$GENE_SYMBOL %in% try_again_entrez,]
+  
+  synonym_to_ensembl <- getBM(filters = c('external_synonym'),
+                              attributes = c(biomart_filter,
+                                            'chromosome_name',
+                                            'start_position',
+                                            'end_position',
+                                            species_gene_symbol,
+                                            "strand",
+                                            "external_synonym"),
+                              values =  try_again_2,
+                              mart = ensembl,
+                              uniqueRows = T)
+  
+  biospyder <- left_join(biospyder,
+                    to_add_missing,
+                    by = c("PROBE_ID"),
+                    suffix = c("", ".y")) %>%
+    mutate(ENSEMBL_GENE_ID = dplyr::coalesce(ENSEMBL_GENE_ID, ensembl_gene_id)) %>%
+    dplyr::select(-ensembl_gene_id) %>%
+    left_join(symbol_to_ensembl, by = c("GENE_SYMBOL" = "GENE_SYMBOL"), suffix = c("", ".y")) %>% 
+    mutate(ENSEMBL_GENE_ID = dplyr::coalesce(ENSEMBL_GENE_ID, ensembl_gene_id)) %>%
+    dplyr::select(-ensembl_gene_id) %>%
+    left_join(synonym_to_ensembl, by = c("GENE_SYMBOL" = "external_synonym"), suffix = c("", ".y")) %>%
+    mutate(ENSEMBL_GENE_ID = dplyr::coalesce(ENSEMBL_GENE_ID, ensembl_gene_id)) %>%
+    dplyr::select(-ensembl_gene_id)
+  biospyder <- biospyder %>% dplyr::select(1:12)
+  
+  # biospyder %>% dplyr::filter(is.na(ENSEMBL_GENE_ID)) %>% glimpse()
+  
+  #################################################
+  # Don't do this
+  # It collapses probes by gene sybmols - which is not really the best way.
+  # We will keep probe-level values because they are usually transcript specific.
+  #################################################
   # 
-  
-  
+  # sampleData <- sampleData %>%
+  #   mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", ""))
+  # 
+  # sampleDataTable <- data.table(sampleData %>% dplyr::select(-PROBE_NAME))
+  # sampleData <- sampleDataTable[, lapply(.SD, sum), by = "GENE_SYMBOL"]
+  # 
+  # # sampleData <- sampleData %>%
+  # #   mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", "")) %>%
+  # #   dplyr::group_by(GENE_SYMBOL) %>%
+  # #   dplyr::summarise_if(.predicate = function(x) is.numeric(x),
+  # #                       .funs = c("sum")) %>%
+  # #   ungroup()
+  # sampleData <- as.data.frame(sampleData)
+  # row.names(sampleData) <- sampleData$GENE_SYMBOL
+  # sampleData <- sampleData[,-1]
+
   # biospyder %>% select(ENSEMBL_GENE_ID) %>% distinct() %>% count()
   # sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,] # If aligned to hg38...
+  
 } else { 
   print("Platform/technology not recognized") 
 }
@@ -613,14 +737,12 @@ knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
 This section shows the number of reads obtained for sample groups included in the report.  
 
 ```{r read-counts, warning = FALSE}
+reads_df = data.frame(reads = round(colSums(sampleData), 3))
+reads_df$original_names <- row.names(reads_df)
 
-smpInfo = DESeqDesign
-temp4plot = data.frame(reads = round(colSums(sampleData), 3))
-temp4plot$original_names <- row.names(temp4plot)
+reads_df_annotated <- dplyr::left_join(DESeqDesign, reads_df)
 
-temp4plot_annotated <- dplyr::left_join(smpInfo, temp4plot)
-
-ggplot(temp4plot_annotated,
+ggplot(reads_df,
        aes(x = !!sym(params$design),
            y = reads)) +
   geom_boxplot() +
@@ -692,8 +814,9 @@ The code above (not shown by default) loads in plotting functions specific to th
 ```{r 'run_ODAF_code', collapse = TRUE, warning = FALSE, message = FALSE, eval = flag}
 
 # Initial setup for DESeq2 contrasts
-cooks   <- FALSE # Normally set Cook's cutoff to false
+cooks   <- F # Sometimes may need consideration
 resList <- list()
+resListAll <- list()
 Counts  <- counts(dds, normalized = TRUE)
 CPMdds  <- cpm(counts(dds, normalized = TRUE))
 
@@ -726,14 +849,14 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
   		CountsPass <- NULL
   			for (group in 1:length(SampPerGroup)) { 
   				sampleCols <- grep(dimnames(SampPerGroup)[[1]][group], DE_Design[, DESIGN])
-  				Check < -sum(CPMdds[gene,sampleCols] >= MinCount) >= 0.75 * SampPerGroup[group]
+  				Check <- sum(CPMdds[gene,sampleCols] >= MinCount) >= 0.75 * SampPerGroup[group]
   				CountsPass <- c(CountsPass, Check)
   		}
   	if (sum(CountsPass) > 0) {Filter[gene, 1] <- 1 }	else {Filter[gene,1] <- 0 }
   	}
 
   compte <- Counts[Filter[,1] == 1,]
-  Filter <- Filter[rownames(Filter) %in% rownames(compte),]
+  Filter <- Filter[rownames(Filter) %in% rownames(compte), , drop = F]
 
   print(paste0("Relevance filtering removed ", nrow(dds) - nrow(Filter),
               " genes from the ", nrow(dds)," assessed. ",
@@ -744,11 +867,11 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	currentContrast <- c(DESIGN, condition2, condition1)
 	res <- DESeq2::results(dds[rownames(compte),],
 	               parallel = TRUE,
-	               BPPARAM = MulticoreParam(cpus),
+	               BPPARAM = MulticoreParam(params$cpus),
 	               contrast = currentContrast,
 	               pAdjustMethod = 'fdr',
-	               cooksCutoff = cooks) # Cooks cutoff disabled - manually inspect.
-	res <- lfcShrink(dds = dds[idx],
+	               cooksCutoff = cooks) # If Cooks cutoff disabled - manually inspect.
+	res <- lfcShrink(dds = dds[rownames(compte),],
 	                 contrast = currentContrast,
 	                 res = res,
 	                 type = "ashr")
@@ -756,14 +879,13 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	# Make new directory for the ODAF-specific files
 	ODAFdir <- file.path(paths$DEG_output, "R-ODAF")
 	if (!dir.exists(ODAFdir)) {dir.create(ODAFdir, recursive = TRUE)}
-	setwd(ODAFdir)
 	FileName <- paste(NORM_TYPE, condition2, "vs", condition1, "FDR", pAdjValue, sep = "_")
 	
 	# Create output tables
 	norm_data <<- counts(dds[rownames(compte)], normalized = TRUE)
 	DEsamples <<- subset(res, res$padj < pAdjValue)
-	DECounts <- compte[rownames(compte) %in% rownames(DEsamples),]
-	Filter <- Filter[rownames(Filter) %in% rownames(DECounts),]
+	DECounts <- compte[rownames(compte) %in% rownames(DEsamples), , drop = F]
+	Filter <- Filter[rownames(Filter) %in% rownames(DECounts), , drop = F]
 	
 	print("Check median against third quantile" )
 	print("AND")
@@ -775,10 +897,10 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 		sampleColsg1 <- grep(dimnames(SampPerGroup)[[1]][1],DE_Design[,DESIGN])
 		sampleColsg2 <- grep(dimnames(SampPerGroup)[[1]][2],DE_Design[,DESIGN])
 		
-	  Check <- median(DECounts[gene, sampleColsg1]) > quantile(DECounts[gene, sampleColsg2], 0.75)[[1]]
+	  Check <- median(as.numeric(DECounts[gene, sampleColsg1])) > quantile(DECounts[gene, sampleColsg2], 0.75)[[1]]
 		quantilePass <- c(quantilePass, Check)
 		
-		Check <- median(DECounts[gene, sampleColsg2]) > quantile(DECounts[gene, sampleColsg1], 0.75)[[1]]
+		Check <- median(as.numeric(DECounts[gene, sampleColsg2])) > quantile(DECounts[gene, sampleColsg1], 0.75)[[1]]
 		quantilePass <- c(quantilePass, Check)
 			
 		if (sum(quantilePass) > 0) {
@@ -815,18 +937,28 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
               " gene(s) with a spike"))
 
  # Save the normalized counts and the list of DEGs
-	write.table(norm_data, file = paste0(FileName, "_Norm_Data.txt"), sep = "\t", quote = FALSE)
-	write.table(DEsamples, file = paste0(FileName, "_DEG_table.txt"), sep = "\t", quote = FALSE)
-	write.table(DECounts_spike, file = paste0(FileName, "_failed_quantile_table.txt"), sep = "\t", quote = FALSE)
-	write.table(DECounts_spike, file = paste0(FileName, "_DEspikes_table.txt"), sep = "\t", quote = FALSE)
+	write.table(norm_data,
+	            file = paste0(ODAFdir, FileName, "_Norm_Data.txt"),
+	            sep = "\t",
+	            quote = FALSE)
+	write.table(DEsamples,
+	            file = paste0(ODAFdir, FileName, "_DEG_table.txt"),
+	            sep = "\t",
+	            quote = FALSE)
+	write.table(DECounts_no_quant,
+	            file = paste0(ODAFdir,FileName, "_failed_quantile_table.txt"),
+	            sep = "\t",
+	            quote = FALSE)
+	write.table(DECounts_spike,
+	            file = paste0(ODAFdir, FileName, "_DEspikes_table.txt"),
+	            sep = "\t",
+	            quote = FALSE)
 
 	print("DESeq2 Done")
 	
 	colnames(norm_data) <- colData(dds)[, DESIGN]
 
-	write.table(FlagSpike, file = paste0(FileName, "_FlaggedSpikes.txt"), sep = "\t", quote = FALSE)
-	
-	#resList[[x]] <- res
+	resListAll[[x]] <- res
 	resList[[x]] <- DECounts_real
 	
 	if (R_ODAF_plots == TRUE) {
@@ -858,9 +990,13 @@ The code above (not shown by default) runs the R-ODAF spurious spike detection a
 The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`. An alpha of `r resList[[1]]@metadata$alpha` was used to extract raw results, which are reported as the `r gsub(mcols(x=resList[[1]])$description[[4]],pattern=":.*",replacement="")`. To account for multiple testing, `r mcols(resList[[1]])$description[5]` are reported. Cook's cutoff was set to `r cooks` in this analysis.  
 
 
-## Create summary tables
+## Create annotation tables
 
-```{r create_tables, collapse = TRUE, warning = FALSE, message = FALSE, eval = flag}
+```{r}
+################################################################################
+# Annotations
+################################################################################
+
 #listEnsembl()
 #listMarts()
 #listDatasets(useMart('ensembl'))
@@ -868,7 +1004,10 @@ ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "useast.ensembl
 #listAttributes(ensembl)
 #listFilters(ensembl)
 
-genes <- row.names(resList[[1]])
+
+genes <- lapply(resListAll,
+                function(x) row.names(as.data.frame(x)))
+genes <- unlist(genes) %>% unique()
 #genes_all <- unique(row.names(assay(dds)))
 
 if (file.exists(file.path(paths$RData, "id_table.Rdata"))) {
@@ -877,8 +1016,8 @@ if (file.exists(file.path(paths$RData, "id_table.Rdata"))) {
   id_table <- id_table_entrez[, 1:3]
   } else {
   id_table_entrez <- getBM(filters = biomart_filter,
-                        attributes = c("ensembl_gene_id",
-                                      "external_gene_name", # mgi_symbol for Mouse
+                        attributes = c(biomart_filter,
+                                      species_gene_symbol,
                                       "description",
                                       "entrezgene_id",
                                       "entrezgene_accession"),
@@ -887,50 +1026,63 @@ if (file.exists(file.path(paths$RData, "id_table.Rdata"))) {
   save(id_table_entrez, file = file.path(paths$RData, "id_table.Rdata"))
   id_table <- id_table_entrez[, 1:3]
 }
+```
 
-sigtabList <- list()
-alltablList <- list()
-for (i in 1:length(resList)) {
-  print(i)
-  sigTab <- resList[[i]]
-  # Add taxonomy
-  if (nrow(sigTab) == 0) {
-    next
-  } else {
-    sigTab <- cbind(genes = row.names(resList[[i]]),
-                    as(sigTab, "data.frame"),
-                    contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
-                                    replacement =  "",
-                                    x = resList[[i]]@elementMetadata[[2]][2]))
-    names(sigTab)[names(sigTab) == "genes"] <- biomart_filter
-    sigTab <- dplyr::left_join(sigTab,
-                               id_table,
-                               by = biomart_filter)
-    sigTab <- dplyr::mutate(sigTab, linearFoldChange = ifelse(log2FoldChange > 0,
-                                                            2 ^ log2FoldChange,
-                                                            -1 / (2 ^ log2FoldChange)))
-    #sigTab <- sigTab[, c(1, 9, 10, 2, 3, 11, 5:8)] # Reorder columns
-    sigTab <- sigTab[, c(1, 8, 9, 2, 3, 10, 4:7)]
-    alltablList[[i]] <- sigTab
-    sigTab <- sigTab[!is.na(sigTab$padj) & sigTab$padj < alpha & abs(sigTab$linearFoldChange) > linear_fc_filter, ] ## FILTERS!
-    sigtabList[[i]] <- sigTab %>% dplyr::distinct()
+
+## Create summary tables
+
+```{r create_tables, collapse = TRUE, warning = FALSE, message = FALSE, eval = flag}
+################################################################################
+# Table modifications
+################################################################################
+
+annotate_deseq_table <- function(deseq_results_list, filter_results = F) {
+  x <- deseq_results_list
+  annotated_results <- list()
+  for (i in 1:length(x)) {
+    print(i)
+    deg_table <- x[[i]]
+    # Add taxonomy
+    if (nrow(deg_table) == 0) {
+      next
+    } else {
+      deg_table <- cbind(genes = row.names(x[[i]]),
+                      as(deg_table, "data.frame"),
+                      contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
+                                      replacement =  "",
+                                      x = x[[i]]@elementMetadata[[2]][2]))
+      names(deg_table)[names(deg_table) == "genes"] <- biomart_filter
+      deg_table <- dplyr::left_join(deg_table,
+                                    id_table,
+                                    by = biomart_filter)
+      deg_table <- dplyr::mutate(deg_table, linearFoldChange = ifelse(log2FoldChange > 0,
+                                                              2 ^ log2FoldChange,
+                                                              -1 / (2 ^ log2FoldChange)))
+      deg_table <- deg_table[, c(1, 8, 9, 2, 3, 10, 4:7)]
+      ## FILTERS ##
+      if (filter_results == T) {
+      deg_table <- deg_table[!is.na(deg_table$padj) & deg_table$padj < alpha & abs(deg_table$linearFoldChange) > linear_fc_filter, ]
+      }
+      annotated_results[[i]] <- deg_table %>% dplyr::distinct()
+    }
   }
+  y <- rbindlist(annotated_results)
+  return(y)
 }
+
 # Write dataframe of all results
 # Significant only
-sigtabList <- sigtabList[!sapply(sigtabList, is.null)]
-significantResults <- rbindlist(sigtabList)
-significantResults <- dplyr::distinct(significantResults)
-significantResults <- significantResults %>% dplyr::mutate(contrast =  as_factor(contrast))
+significantResults <- annotate_deseq_table(resList, filter_results = T)
+significantResults <- significantResults %>% dplyr::mutate(contrast = as_factor(contrast))
 # All results including non-significant
-allResults <- rbindlist(alltablList)
-allResults <- allResults %>% dplyr::mutate(contrast =  as_factor(contrast))
+allResults <- annotate_deseq_table(resListAll, filter_results = F)
+allResults <- allResults %>% dplyr::mutate(contrast = as_factor(contrast))
 
 # All Results for Plotting
 # Replace NA gene symbols with ensembl ID
-allResults$external_gene_name[is.na(allResults$external_gene_name)] <- allResults$ensembl_gene_id[is.na(allResults$external_gene_name)] 
+allResults[[species_gene_symbol]][is.na(allResults[[species_gene_symbol]])] <- allResults[[biomart_filter]][is.na(allResults[[species_gene_symbol]])] 
 # Replace blank gene symbols with ensembl ID
-allResults$external_gene_name[allResults$external_gene_name == ""]  <- allResults$ensembl_gene_id[allResults$external_gene_name == ""]
+allResults[[species_gene_symbol]][allResults[[species_gene_symbol]] == ""]  <- allResults[[biomart_filter]][allResults[[species_gene_symbol]] == ""]
 
 IPA <- allResults %>% 
   distinct() %>% 
@@ -1017,6 +1169,8 @@ numColsToPrepend <- ncol(CPMddsDF) - ncol(CPMdds) - 1
 colPositionsToPrependSTART <- ncol(CPMddsDF) - numColsToPrepend + 1
 colPositionsOfData <- ncol(CPMddsDF) - numColsToPrepend
 CPMddsDF <- CPMddsDF[, c(1, colPositionsToPrependSTART:ncol(CPMddsDF), 2:colPositionsOfData)]
+
+
 ```
 
 The code above (not shown by default) generates tables summarizing the differentially expressed genes (DEGs).  A linear fold change cutoff of `r linear_fc_filter` and adjusted p-value of `r alpha` was used to filter the results.
@@ -1033,12 +1187,21 @@ kable(degTable,
 #######################################
 ### Write results table from DESeq2
 #######################################
-setwd(paths$DEG_output)
-write.table(allResults,         file = paste0(NORM_TYPE, "-DESeq_output_ALL.txt"),               quote = F, sep = '\t', col.names = NA)
-write.table(significantResults, file = paste0(NORM_TYPE, "-DESeq_output_significant.txt"),       quote = F, sep = '\t', col.names = NA)
-write.table(summaryTable,       file = paste0(NORM_TYPE, "-DESeq_output_all_genes.txt"),         quote = F, sep = '\t', col.names = NA)
-write.table(CPMddsDF,           file = paste0(NORM_TYPE, "-Per_sample_CPM.txt"),                 quote = F, sep = '\t', col.names = NA)
-write.table(Counts,             file = paste0(NORM_TYPE, "-Per_sample_normalized_counts.txt"),   quote = F, sep = '\t', col.names = NA)
+write.table(allResults,
+            file = file.path(paths$DEG_output, NORM_TYPE,"-DESeq_output_ALL.txt"),
+            quote = F, sep = '\t', col.names = NA)
+write.table(significantResults,
+            file = paste0(paths$DEG_output, NORM_TYPE, "-DESeq_output_significant.txt"),
+            quote = F, sep = '\t', col.names = NA)
+write.table(summaryTable,
+            file = paste0(paths$DEG_output, NORM_TYPE, "-DESeq_output_all_genes.txt"),
+            quote = F, sep = '\t', col.names = NA)
+write.table(CPMddsDF,
+            file = paste0(paths$DEG_output, NORM_TYPE, "-Per_sample_CPM.txt"),
+            quote = F, sep = '\t', col.names = NA)
+write.table(Counts,
+            file = paste0(paths$DEG_output, NORM_TYPE, "-Per_sample_normalized_counts.txt"),
+            quote = F, sep = '\t', col.names = NA)
 ```
 
 The code above (not shown by default) writes text files for each DEG summary type.
@@ -1046,7 +1209,6 @@ The code above (not shown by default) writes text files for each DEG summary typ
 # Write data
 
 ```{r 'write-excel-worksheets', collapse = TRUE, warning = FALSE, message = FALSE, eval = flag}
-setwd(paths$DEG_output)
 #######################################
 ### Write results above but in Excel
 #######################################
@@ -1100,7 +1262,7 @@ writeDataTable(wb1,
                na.string = "NA")
 setColWidths(wb1, sheet = 1, cols = 1:6, widths = "auto") # This is hard-coded, so prone to error; will only impact auto adjustment of col widths.
 setColWidths(wb1, sheet = 1, cols = 7:ncol(summaryTable), widths = 13) # This is hard-coded, so prone to error; will only impact auto adjustment of col widths.
-fname1 <- paste0("1.", NORM_TYPE, "-DESeq_by_gene.xlsx")
+fname1 <- file.path(paths$DEG_output, "1.", NORM_TYPE, "-DESeq_by_gene.xlsx")
 saveWorkbook(wb1, fname1, overwrite = TRUE)
 
 ### All results in one table
@@ -1130,7 +1292,8 @@ writeDataTable(wb2,
                keepNA = T,
                na.string = "NA")
 setColWidths(wb2, sheet = 2, cols = 1:ncol(allResults), widths = "auto")
-saveWorkbook(wb2, paste0("2.", NORM_TYPE, "-DESeq_all.xlsx"), overwrite = TRUE)
+fname2 <- file.path(paths$DEG_output, "2.", NORM_TYPE, "-DESeq_all.xlsx")
+saveWorkbook(wb2, fname2, overwrite = TRUE)
 
 ### All results with different tabs for each contrast
 wb3 <- createWorkbook()
@@ -1157,7 +1320,8 @@ for (i in 1:length(levels(factor(allResults$contrast)))) {
                  na.string = "NA")
   setColWidths(wb3, sheet = i, cols = 1:ncol(dataToWrite), widths = "auto")
 }
-saveWorkbook(wb3, paste0("3.", NORM_TYPE, "-DESeq_by_contrast.xlsx"), overwrite = TRUE)
+fname3 <- file.path(paths$DEG_output, "3.", NORM_TYPE, "-DESeq_by_contrast.xlsx")
+saveWorkbook(wb3, fname3, overwrite = TRUE)
 
 ### CPM
 wb4 <- createWorkbook()
@@ -1174,7 +1338,8 @@ writeDataTable(wb4,
                keepNA = T,
                na.string = "NA")
 setColWidths(wb4, sheet = 1, cols = 1:ncol(CPMddsDF), widths = "auto")
-saveWorkbook(wb4, paste0("4.", NORM_TYPE, "-CPM.xlsx"), overwrite = TRUE)
+fname4 <- file.path(paths$DEG_output, "4.", NORM_TYPE, "-CPM.xlsx")
+saveWorkbook(wb4, fname4, overwrite = TRUE)
 
 ### IPA
 wb5 <- createWorkbook()
@@ -1191,7 +1356,8 @@ writeDataTable(wb5,
                keepNA = T,
                na.string = "NA")
 setColWidths(wb5, sheet = 1, cols = 1:ncol(IPA), widths = "auto")
-saveWorkbook(wb5, paste0("5.", NORM_TYPE, "-IPA.xlsx"), overwrite = TRUE)
+fname5 <- file.path(paths$DEG_output, "5.", NORM_TYPE, "-IPA.xlsx")
+saveWorkbook(wb5, fname5, overwrite = TRUE)
 
 ```
 
@@ -1214,19 +1380,6 @@ These files should be provided to you as a separate zip file.
 # xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
 ```
 
-```{r 'save_point', show = FALSE, eval = flag}
-# Save RData here if flag is TRUE.
-if (is.na(params$group_facet)) {
-  save.image(file = file.path(paths$RData, "Partial_analysis.RData"))
-} else {
-  save.image(file = file.path(paths$RData,
-                              paste0("Partial_analysis_",
-                                     paste(params$group_filter, collapse = "_"),
-                                     ".RData")))
-}
-# Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
-# If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
-```
 
 # PCA Plots {.tabset .tabset-fade}
 
@@ -1411,23 +1564,29 @@ pheatmap(mat,
 mat_top <- assay(rld)[row.names(assay(rld)) %in% allResultsOrdered_logFC_filter[1:nHeatmapDEGs,][[biomart_filter]],]
 mat_top <- mat_top - rowMeans(mat_top)
 
-genes_for_heatmap <- row.names(mat_top)
 genes_for_heatmap <- data.frame(genes = row.names(mat_top))
 names(genes_for_heatmap)[names(genes_for_heatmap) == "genes"] <- biomart_filter
 genes_for_heatmap <- dplyr::left_join(genes_for_heatmap,
                                       id_table_entrez,
                                       by = biomart_filter) %>%
+  dplyr::select(!!ensym(biomart_filter), !!ensym(species_gene_symbol)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(!!ensym(biomart_filter)) %>%
+  dplyr::mutate(combined = paste0(!!ensym(species_gene_symbol), collapse = ", ")) %>%
+  dplyr::select(-!!ensym(species_gene_symbol)) %>%
   dplyr::distinct()
+names(genes_for_heatmap)[names(genes_for_heatmap) == "combined"] <- species_gene_symbol
+
   
-genes_for_heatmap[["external_gene_name"]] <- ifelse(is.na(genes_for_heatmap[["external_gene_name"]]),
-               genes_for_heatmap[["ensembl_gene_id"]],
-               genes_for_heatmap[["external_gene_name"]])
+genes_for_heatmap[[species_gene_symbol]] <- ifelse(is.na(genes_for_heatmap[[species_gene_symbol]]),
+               genes_for_heatmap[[biomart_filter]],
+               genes_for_heatmap[[species_gene_symbol]])
 
-genes_for_heatmap[["external_gene_name"]] <- ifelse(genes_for_heatmap[["external_gene_name"]] == "",
-               genes_for_heatmap[["ensembl_gene_id"]],
-               genes_for_heatmap[["external_gene_name"]])
+genes_for_heatmap[[species_gene_symbol]] <- ifelse(genes_for_heatmap[[species_gene_symbol]] == "",
+               genes_for_heatmap[[biomart_filter]],
+               genes_for_heatmap[[species_gene_symbol]])
 
-genes_for_heatmap <- genes_for_heatmap %>% pull(external_gene_name) %>% unique()
+genes_for_heatmap <- genes_for_heatmap %>% pull(species_gene_symbol)
 
 pheatmap(mat_top,
          annotation_col = heatmap_df,
@@ -1435,7 +1594,7 @@ pheatmap(mat_top,
          show_rownames = TRUE,
          border_color = NA,
          scale = "row")
-# color = inferno(10)
+color = inferno(10)
 
 ```
 
@@ -1447,14 +1606,29 @@ select = order(rv, decreasing = TRUE)[1:nHeatmap]
 matRV <- assay(rld)[select,]
 matRV <- matRV - rowMeans(matRV)
 
-genes_for_heatmap <- row.names(matRV)
 genes_for_heatmap <- data.frame(genes = row.names(matRV))
 names(genes_for_heatmap)[names(genes_for_heatmap) == "genes"] <- biomart_filter
-genes_for_heatmap <- dplyr::left_join(genes_for_heatmap, id_table_entrez,
+genes_for_heatmap <- dplyr::left_join(genes_for_heatmap,
+                                      id_table_entrez,
                                       by = biomart_filter) %>%
+  dplyr::select(!!ensym(biomart_filter), !!ensym(species_gene_symbol)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(!!ensym(biomart_filter)) %>%
+  dplyr::mutate(combined = paste0(!!ensym(species_gene_symbol), collapse = ", ")) %>%
+  dplyr::select(-!!ensym(species_gene_symbol)) %>%
   dplyr::distinct()
+names(genes_for_heatmap)[names(genes_for_heatmap) == "combined"] <- species_gene_symbol
 
-genes_for_heatmap <- genes_for_heatmap %>% pull(external_gene_name) %>% unique()
+  
+genes_for_heatmap[[species_gene_symbol]] <- ifelse(is.na(genes_for_heatmap[[species_gene_symbol]]),
+               genes_for_heatmap[[biomart_filter]],
+               genes_for_heatmap[[species_gene_symbol]])
+
+genes_for_heatmap[[species_gene_symbol]] <- ifelse(genes_for_heatmap[[species_gene_symbol]] == "",
+               genes_for_heatmap[[biomart_filter]],
+               genes_for_heatmap[[species_gene_symbol]])
+
+genes_for_heatmap <- genes_for_heatmap %>% pull(species_gene_symbol)
 
 pheatmap(matRV,
          #color = rev(brewer.pal(11, "RdBu")), # inferno(10),
@@ -1486,14 +1660,14 @@ ylims_for_ma_plots <- c(-foldchangestats$stats[4, 1], foldchangestats$stats[4, 1
 ```{r 'MAplotalpha', results='asis'}
 ## MA plot with alpha used in DESeq2::results()
 
-for (i in seq_along(resList)) {
+for (i in seq_along(resListAll)) {
   contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
                   replacement =  "",
-                  x = resList[[i]]@elementMetadata[[2]][2])
+                  x = resListAll[[i]]@elementMetadata[[2]][2])
   cat("###", contrast, "  \n\n")
-  MA_title <- paste0('MA plot, alpha = ', metadata(resList[[i]])$alpha,', ', contrast)
-  DESeq2::plotMA(resList[[i]],
-                 alpha = metadata(resList[[i]])$alpha,
+  MA_title <- paste0('MA plot, alpha = ', metadata(resListAll[[i]])$alpha,', ', contrast)
+  DESeq2::plotMA(resListAll[[i]],
+                 alpha = metadata(resListAll[[i]])$alpha,
                  main = str_wrap(MA_title, width = 40),
                  ylim = ylims_for_ma_plots)
   cat('  \n\n')
@@ -1613,13 +1787,13 @@ if (!is.null(searchURL)) {
                              '" rel="noopener noreferrer" target="_blank">',
                              res.df.dt$ensembl_gene_id,
                              '<br/>',
-                             res.df.dt$external_gene_name,
+                             res.df.dt[[species_gene_symbol]],
                              '</a>')
 }
 
 res.df.dt[, 'padj'] <- format(res.df.dt[, 'padj'], scientific = TRUE, digits = digits)
 res.df.dt[, 'pvalue'] <- format(res.df.dt[, 'pvalue'], scientific = TRUE, digits = digits)
-res.df.dt <- res.df.dt %>% dplyr::select(-c(description, external_gene_name))
+res.df.dt <- res.df.dt %>% dplyr::select(-c(description, !!ensym(species_gene_symbol)))
 
 DT::datatable(res.df.dt,
           options = list(pagingType = 'full_numbers',
@@ -1660,8 +1834,8 @@ plotCounts_gg <- function(i, dds, intgroup) {
                        gene = i,
                        intgroup = intgroup,
                        returnData = TRUE)
-    plot_title <- paste(id_table$external_gene_name[id_table[[biomart_filter]] == i],
-                        id_table$ensembl_gene_id[id_table[[biomart_filter]] == i])
+    plot_title <- paste(id_table[[biomart_filter]][id_table[[biomart_filter]] == i],
+                        id_table[[species_gene_symbol]][id_table[[biomart_filter]] == i])
     if (ncol(plotdata) > 2) {
       colorCol = 3
     } else {colorCol = 2}
@@ -1697,9 +1871,9 @@ allResultsOrdered_logFC_filter %>%
   top_n(numResults, wt = abs(log2FoldChange)) %>%
   ungroup() %>%
   mutate(contrast = as.factor(contrast),
-         external_gene_name = reorder_within(external_gene_name, log2FoldChange, contrast)) %>%
+         symbol = reorder_within(!!ensym(species_gene_symbol), log2FoldChange, contrast)) %>%
   ggplot(aes(x = log2FoldChange,
-             y = external_gene_name,
+             y = symbol,
              color = contrast,
              size = -log(padj))) +
   geom_point(show.legend = TRUE) +

@@ -9,7 +9,7 @@ output:
     code_download: true
 knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(here::here(),"reports","Study-wide_Sample_QC.html")) })
 title: "Study-wide sample quality control"
-subtitle: "Bisphenols TempO-Seq"
+subtitle: "Tiparp TCDD"
 author: "Matthew J. Meier"
 ---
 
@@ -32,21 +32,21 @@ tree_height_cutoff=0.1 # For clustering
 dendro_color_by="Group" # Specify how you would like to color the dendrograms
 nmr_threshold=100000 # 10% of 1M reads for TempOSeq = 100,000; 10% of 10M reads for RNA-Seq = 1,000,000.
 align_threshold=0.5 # 50% alignment rate for TempO-Seq Experiments
-gini_cutoff=0.95
-sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
+gini_cutoff=0.99
+sampledata_sep="\t" # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
 groups=list() # Column name(s) in your metadata to use for annotations of experimental groups
-groups[[1]] <- c("Group","Chemical","Dose")
-groups[[2]] <- c("I7_Index_ID","I5_Index_ID")
-groups[[3]] <- c("Row","Column")
-groups[[4]] <- c("Batch")
-batch_var <- "Batch"
-dose <- "Dose" # If there is a dose in the experiment; otherwise use NULL
-treatment_var <- "Chemical"
-Platform <- "TempO-Seq" # TempO-Seq Or RNA-Seq
+groups[[1]] <- c("Group","Timepoint","Treatment")
+#groups[[2]] <- c("I7_Index_ID","I5_Index_ID")
+#groups[[3]] <- c("Row","Column")
+#groups[[4]] <- c("Batch")
+batch_var <- NULL #"batch"
+dose <- "dose" # If there is a dose in the experiment; otherwise use NULL
+treatment_var <- "Treatment"
+Platform <- "RNA-Seq" # TempO-Seq Or RNA-Seq
 # Column names for metadata, if applicable
-technical_control="Technical_control"
-reference_rna="Reference_rna"
-solvent_control="Solvent_control"
+technical_control="technical_control"
+reference_rna="reference_rna"
+solvent_control="solvent_control"
 ```
 
 ```{r load_libraries, message=F, warnings=F, echo=F}
@@ -557,8 +557,6 @@ if(Platform=="TempO-Seq") {
   # d %>%
   #   dplyr::filter(original_names %in% failed_alignment_threshold$Sample) %>%
   #   dplyr::pull(treatment_var)
-  } else {
-    next
   }
 
 ```
@@ -689,7 +687,7 @@ correlation_df_all_heatmap <- correlation_df_all[,c(unlist(groups[[1]]),
 pheatmap(ref_correlations_all,
          show_rownames = F,
          show_colnames = F,
-         border_color=NA,
+         border_color = NA,
          annotation_col = correlation_df_all_heatmap)
 
 # Heatmap(ref_correlations_all,
@@ -1014,19 +1012,33 @@ covariate_names <- names(potential_covariates[potential_covariates < 24])
 #                     "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
 #           ggplot2::aes(colour=groups[[1]][1]))
 # }
-
-for(i in seq_along(groups)[2:length(groups)]){
+if (length(groups) > 1 & !is.null(batch_var)) {
+  for (i in seq_along(groups)[2:length(groups)]) {
+    p <- ggpairs(QAQC_metadata_subset,
+                 cardinality_threshold = 24,
+                 columns = c(unlist(groups[[i]]),
+                           "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+                 ggplot2::aes(colour = !!ensym(batch_var)))
+    print(p)
+  }
+} else {
+  if (!is.null(batch_var)) {
   p <- ggpairs(QAQC_metadata_subset,
-               cardinality_threshold = 24,
-               columns=c(unlist(groups[[i]]),
-                         "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
-               ggplot2::aes(colour=!!ensym(batch_var)))
+                 cardinality_threshold = 24,
+                 columns = c(unlist(groups),
+                           "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+                 ggplot2::aes(colour = !!ensym(batch_var)))
   print(p)
+} else {
+  if (is.null(batch_var)) {
+  p <- ggpairs(QAQC_metadata_subset,
+                 cardinality_threshold = 24,
+                 columns = c(unlist(groups),
+                           "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"))
+  print(p)
+  }
 }
-
-
-
-
+}
 
 ```
 
@@ -1347,7 +1359,7 @@ dev.off()
 
 ### Batch
 
-```{r plot_batch_effects}
+```{r plot_batch_effects, eval = !is.null(batch_var)}
 ggplot(QAQC_annotated, aes(x=batch_var, color=treatment_var)) +
   geom_boxplot(aes(y=Gini_data)) +
   facet_grid(paste0("~",batch_var), scales = "free_x") +

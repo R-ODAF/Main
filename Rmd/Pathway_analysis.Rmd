@@ -11,8 +11,9 @@ entrezDEGs <- dplyr::left_join(significantResults,
                                by=biomart_filter)
 entrezDEGs <- as.vector(entrezDEGs$entrezgene_id)
 
-Wiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt", destpath = paths$DEG_output, date="20210310")
-wp2gene <- clusterProfiler::read.gmt(file.path(paths$DEG_output,Wiki))
+#Wiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt", destpath = paths$DEG_output, date="20210310")
+#wp2gene <- clusterProfiler::read.gmt(file.path(paths$DEG_output,Wiki))
+wp2gene <- clusterProfiler::read.gmt(file.path(paths$wikipathways,wiki))
 wp2gene <- wp2gene %>% tidyr::separate(1, c("name","version","wpid","org"), "%")
 wpid2gene <- wp2gene %>% dplyr::select(wpid,gene) #TERM2GENE
 wpid2name <- wp2gene %>% dplyr::select(wpid,name) #TERM2NAME
