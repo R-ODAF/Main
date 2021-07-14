@@ -121,7 +121,7 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   
   # compute the DEGs on the genes passing the Relevance condition
   
-  res <- results(dds[rownames(compte),], contrast=c(DESIGN[x], condition2, condition1), pAdjustMethod= 'fdr')
+  res <- results(dds[rownames(compte),], alpha = 0.01, cooksCutoff =F, independentFiltering=T, contrast=c(DESIGN[x], condition2, condition1), pAdjustMethod= 'fdr')
   
   setwd(outputdir)
   FileName<-paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")
@@ -137,7 +137,8 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   print("AND")
   print("Check the presence of a spike" )
   
-  for (gene in 1:nrow(DECounts)) {
+ if (NROW(DECounts) > 0) {
+  for (gene in 1:NROW(DECounts)) {
     
     # Check the median against third quantile
     quantilePass <-NULL
@@ -169,12 +170,15 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   DECounts_real <- DEsamples[rowSums(Filter) == 3 ,]
   DECounts_no_quant <- DEsamples[Filter[,2] == 0 ,]
   DECounts_spike <- DEsamples[Filter[,3] == 0 ,]
-  
-  print(paste("A total of ",nrow(DECounts_real), " DEGs were selected, after ",nrow(DECounts_no_quant)," genes(s) removed by the quantile rule and ", nrow(DECounts_spike)," gene(s) with a spike",sep=""))
+}  
+  print(paste("A total of ",NROW(DECounts_real), " DEGs were selected, after ",NROW(DECounts_no_quant)," genes(s) removed by the quantile rule and ", NROW(DECounts_spike)," gene(s) with a spike",sep=""))
   
   # save the normalized counts and the list of DEGs
   write.table(norm_data,file=paste0(FileName, "_Norm_Data.txt"), sep="\t", quote=FALSE)
   write.table(DECounts_real,file=paste0(FileName,"_DEG_table.txt"), sep="\t", quote=FALSE)
+  # save the filtered DEGs by either the quantile or the Spike rules
+  write.table(DECounts_no_quant,file=paste0(FileName, "_quantile_filt.txt"), sep="\t", quote=FALSE)
+  write.table(DECounts_spike,file=paste0(FileName,"_quantile_filt.txt"), sep="\t", quote=FALSE)
   
   print("DESeq2 Done")
   
