@@ -90,7 +90,7 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   
   SampPerGroup<-table(DE_Design[,DESIGN])
   Counts<-counts(dds, normalized=TRUE)
-  CPMdds<-cpm(counts(dds, normalized=TRUE))
+  CPMdds<-cpm(counts(dds, normalized=FALSE))
   
   Filter <- matrix(data=NA, ncol=3, nrow= nrow(Counts))
   rownames(Filter) <- rownames(Counts)
@@ -178,7 +178,7 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   write.table(DECounts_real,file=paste0(FileName,"_DEG_table.txt"), sep="\t", quote=FALSE)
   # save the filtered DEGs by either the quantile or the Spike rules
   write.table(DECounts_no_quant,file=paste0(FileName, "_quantile_filt.txt"), sep="\t", quote=FALSE)
-  write.table(DECounts_spike,file=paste0(FileName,"_quantile_filt.txt"), sep="\t", quote=FALSE)
+  write.table(DECounts_spike,file=paste0(FileName,"_spike_filt.txt"), sep="\t", quote=FALSE)
   
   print("DESeq2 Done")
   
