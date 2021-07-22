@@ -130,8 +130,8 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   norm_data <<- counts(dds[rownames(compte)],normalized=TRUE) 
   DEsamples <<- subset(res,res$padj < pAdjValue)	
   
-  DECounts <- compte[rownames(compte) %in% rownames(DEsamples),]
-  Filter <- Filter[rownames(Filter) %in% rownames(DECounts),]
+  DECounts <- compte[rownames(compte) %in% rownames(DEsamples),,drop=FALSE]
+  Filter <- Filter[rownames(Filter) %in% rownames(DECounts),,drop=FALSE]
   
   print("Check median against third quantile" )
   print("AND")
