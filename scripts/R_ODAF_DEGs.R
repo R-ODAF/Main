@@ -137,13 +137,14 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   print("AND")
   print("Check the presence of a spike" )
   
- if (NROW(DECounts) > 0) {
+  sampleColsg1 <- grep(dimnames(SampPerGroup)[[1]][1],DE_Design[,DESIGN])
+  sampleColsg2 <- grep(dimnames(SampPerGroup)[[1]][2],DE_Design[,DESIGN])
+
+if (NROW(DECounts) > 0) {
   for (gene in 1:NROW(DECounts)) {
     
     # Check the median against third quantile
     quantilePass <-NULL
-    sampleColsg1 <- grep(dimnames(SampPerGroup)[[1]][1],DE_Design[,DESIGN])
-    sampleColsg2 <- grep(dimnames(SampPerGroup)[[1]][2],DE_Design[,DESIGN])
     
     Check <- median(DECounts[gene,sampleColsg1]) > quantile(DECounts[gene,sampleColsg2], 0.75)[[1]]
     quantilePass <-c(quantilePass, Check)
@@ -154,14 +155,12 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
     
     # Check for spike 
     spikePass <- NULL
-    for (group in 1:length(SampPerGroup)) { 
-      sampleCols<-grep(dimnames(SampPerGroup)[[1]][group],DE_Design[,DESIGN])
-      if (max(DECounts[gene,sampleCols]) ==0) {Check <- FALSE} else {
-        Check <- (max(DECounts[gene,sampleCols])/sum(DECounts[gene,sampleCols])) >= 1.4*(SampPerGroup[group])^(-0.66)
-        spikePass<-c(spikePass, Check)
-      }
-    }
-    if ( sum(spikePass) > 1 ) {Filter[gene,3] <- 0 }	else { Filter[gene,3] <- 1 }
+    if (sum(DECounts[gene,sampleColsg1]) > sum(DECounts[gene,sampleColsg2])) {
+          spikePass <- (max(DECounts[gene,sampleColsg1])/sum(DECounts[gene,sampleColsg1])) >= 1.4*(SampPerGroup[1])^(-0.66)
+     } 
+	  else {spikePass <- (max(DECounts[gene,sampleColsg2])/sum(DECounts[gene,sampleColsg2])) >= 1.4*(SampPerGroup[2])^(-0.66)
+         }  
+		if ( sum(spikePass) > 0 ) {Filter[gene,3] <- 0 } else { Filter[gene,3] <- 1 }
     
   }		
   
