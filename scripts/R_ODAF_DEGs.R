@@ -33,6 +33,7 @@ Platform <- "RNA-Seq" # Specify "RNA-Seq" or "TempO-seq"
 ###################################################################################
 
 #Set parameters according to platform
+# Note: the minimum coverage of 5 million reads is valid only for a gene based analysis. Transcript (or isoform) based analysis would required a much higher coverage
 if (Platform=="RNA-Seq"){
   minCoverage <- 5000000
   MinCount<- 1
