@@ -49,6 +49,7 @@ if (Platform=="RNA-Seq"){
 setwd(sampledir)
 sampleData <- read.delim(SampleDataFile, sep=",", stringsAsFactors=FALSE, header=TRUE,  quote="\"", row.names=1)
 DESeqDesign <- read.delim(SampleKeyFile, stringsAsFactors=FALSE, sep=",", header=TRUE,  quote="\"", row.names="NAME")
+DESeqDesign <- DESeqDesign[colnames(sampleData),] # To make sure that data and metadata are ordered the same way
 
 NORM_TYPE<-paste0(analysisID, "_DESeq2_", Platform)
 print(NORM_TYPE)
