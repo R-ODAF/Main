@@ -73,7 +73,7 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   condition2<- Samp4compare[x]  
   
   DE_Design <- matrix(data=NA, ncol=2)
-  DE_Design <- DESeqDesign [c(grep(condition1,DESeqDesign[,DESIGN[x]]), grep(condition2,DESeqDesign[,DESIGN[x]])),]
+  DE_Design <- DESeqDesign [c(grep(condition1,DESeqDesign[,DESIGN[1]]), grep(condition2,DESeqDesign[,DESIGN[1]])),]
   samples <- sampleData[, rownames(DE_Design) ]
   
   ###########
