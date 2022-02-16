@@ -80,7 +80,7 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   print(paste(condition2, " vs ", condition1, ":", NORM_TYPE))		
   
   colnames(samples)<-NULL
-  dds <- DESeqDataSetFromMatrix(countData = round(samples), colData = as.data.frame(DE_Design), design = as.formula(paste0("~", DESIGN[x])))
+  dds <- DESeqDataSetFromMatrix(countData = round(samples), colData = as.data.frame(DE_Design), design = as.formula(paste0("~", DESIGN[1])))
   
   print("Wait... (dds step executing)")				
   dds <- DESeq(dds, quiet=TRUE)
