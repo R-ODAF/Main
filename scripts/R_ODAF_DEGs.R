@@ -123,7 +123,7 @@ for (x in 1:length(Samp4compare)){	## for all comparisons to be done
   
   # compute the DEGs on the genes passing the Relevance condition
   
-  res <- results(dds[rownames(compte),], contrast=c(DESIGN[x], condition2, condition1), pAdjustMethod= 'fdr')
+  res <- results(dds[rownames(compte),], contrast=c(DESIGN[1], condition2, condition1), pAdjustMethod= 'fdr')
   
   setwd(outputdir)
   FileName<-paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")
